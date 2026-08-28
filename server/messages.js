@@ -1,184 +1,136 @@
-/**
- * ═══════════════════════════════════════════════════════════════
- *  ASSISTIVE COMMUNICATION SYSTEM — Persistent Message Store
- * ═══════════════════════════════════════════════════════════════
- *
- *  Stores messages received from the ESP32 assistive device.
- *  Uses in-memory cache for ultra-fast reads + automatic JSON
- *  file persistence so Message History and Latest Message survive
- *  server restarts / cloud container reboots.
- *
- *  Design:
- *   - Fast in-memory array for synchronous API responses
- *   - Asynchronous file sync to `server/data/messages.json`
- *   - Graceful fallback to pure memory if file system is read-only
- * ═══════════════════════════════════════════════════════════════
- */
+// ============================================================
+// ASSISTIVE COMMUNICATION SYSTEM
+// MESSAGE AND DEVICE STATUS STORAGE
+// ============================================================
 
-const fs = require('fs')
-const path = require('path')
-
-// ── Persistence Setup ────────────────────────────────────────
-const DATA_DIR = path.join(__dirname, 'data')
-const DATA_FILE = path.join(DATA_DIR, 'messages.json')
-
-// ── In-Memory State ──────────────────────────────────────────
-
-/** @type {Array<{id: string, message: string, category: string, button: string, timestamp: string, time: string}>} */
+// Store all received messages
 let messages = []
 
-/** Latest message reference */
-let latestMessage = null
+// Store the latest heartbeat time
+let lastDeviceHeartbeat = null
 
-/** Device connection tracking */
-let deviceConnected = false
-let lastActivityTime = null
+// Device is considered offline if no heartbeat
+// is received for this amount of time.
 
-// If no message received for 30s, mark device as offline
-const DEVICE_TIMEOUT_MS = 30000 // 30 seconds
+const DEVICE_TIMEOUT = 30000
 
-// ── Persistence Helpers ──────────────────────────────────────
+// ============================================================
+// ADD MESSAGE
+// ============================================================
 
-/**
- * Initialize storage directory and load previously saved messages.
- */
-function initStorage() {
-  try {
-    if (!fs.existsSync(DATA_DIR)) {
-      fs.mkdirSync(DATA_DIR, { recursive: true })
-    }
-
-    if (fs.existsSync(DATA_FILE)) {
-      const raw = fs.readFileSync(DATA_FILE, 'utf8')
-      if (raw.trim()) {
-        const parsed = JSON.parse(raw)
-        if (Array.isArray(parsed)) {
-          messages = parsed
-          latestMessage = messages.length > 0 ? messages[0] : null
-          console.log(`  💾 Loaded ${messages.length} message(s) from persistent storage (${DATA_FILE})`)
-        }
-      }
-    }
-  } catch (err) {
-    console.warn('  ⚠️ Could not read messages.json, running in memory-only mode:', err.message)
-  }
-}
-
-/**
- * Persist current messages array to disk.
- */
-function persistMessages() {
-  try {
-    if (!fs.existsSync(DATA_DIR)) {
-      fs.mkdirSync(DATA_DIR, { recursive: true })
-    }
-    fs.writeFile(DATA_FILE, JSON.stringify(messages, null, 2), 'utf8', (err) => {
-      if (err) {
-        console.warn('  ⚠️ Failed to write messages to disk:', err.message)
-      }
-    })
-  } catch (err) {
-    console.warn('  ⚠️ Persistence error:', err.message)
-  }
-}
-
-// ── Helpers ──────────────────────────────────────────────────
-
-/**
- * Format a Date object into a readable 12-hour time string.
- * @param {Date} date
- * @returns {string} e.g. "10:32 AM"
- */
-function formatTime(date) {
-  let h = date.getHours()
-  const m = date.getMinutes().toString().padStart(2, '0')
-  const ampm = h >= 12 ? 'PM' : 'AM'
-  h = h % 12 || 12
-  return `${h}:${m} ${ampm}`
-}
-
-// ── Public API ───────────────────────────────────────────────
-
-/**
- * Add a new message to the store.
- * Called when the ESP32 sends a POST /api/message.
- */
-function addMessage({ message, category, button }) {
+function addMessage({
+  message,
+  category,
+  button,
+}) {
   const now = new Date()
 
-  const msg = {
-    id: Date.now().toString(),
+  const storedMessage = {
+    id: Date.now(),
+
     message,
+
     category,
-    button: button || '',
+
+    button: button || null,
+
     timestamp: now.toISOString(),
-    time: formatTime(now),
+
+    time: now.toLocaleTimeString(),
+
+    date: now.toLocaleDateString(),
   }
 
-  // Prepend so newest is first
-  messages.unshift(msg)
+  messages.unshift(storedMessage)
 
-  // Cap message history to latest 200 items to keep storage lean
-  if (messages.length > 200) {
-    messages = messages.slice(0, 200)
+  // Limit stored messages
+  if (messages.length > 100) {
+    messages = messages.slice(0, 100)
   }
 
-  latestMessage = msg
+  // Receiving a message also means ESP32 is connected
+  updateDeviceHeartbeat()
 
-  // Mark device as connected
-  deviceConnected = true
-  lastActivityTime = Date.now()
-
-  // Save to disk asynchronously
-  persistMessages()
-
-  return msg
+  return storedMessage
 }
 
-/**
- * Get the latest message, or null if none exist.
- */
+// ============================================================
+// GET LATEST MESSAGE
+// ============================================================
+
 function getLatestMessage() {
-  return latestMessage || null
+  if (messages.length === 0) {
+    return null
+  }
+
+  return messages[0]
 }
 
-/**
- * Get all messages (newest first).
- */
+// ============================================================
+// GET ALL MESSAGES
+// ============================================================
+
 function getAllMessages() {
   return messages
 }
 
-/**
- * Clear all stored messages.
- */
+// ============================================================
+// CLEAR MESSAGES
+// ============================================================
+
 function clearMessages() {
   messages = []
-  latestMessage = null
-  persistMessages()
 }
 
-/**
- * Check whether the device should be considered "connected".
- * It's connected if a message arrived within the timeout window.
- */
+// ============================================================
+// UPDATE DEVICE HEARTBEAT
+// ============================================================
+
+function updateDeviceHeartbeat() {
+  lastDeviceHeartbeat = Date.now()
+}
+
+// ============================================================
+// CHECK DEVICE CONNECTION
+// ============================================================
+
 function isDeviceConnected() {
-  if (!deviceConnected) return false
-  if (!lastActivityTime) return false
-  if (Date.now() - lastActivityTime > DEVICE_TIMEOUT_MS) {
-    deviceConnected = false
+  if (!lastDeviceHeartbeat) {
     return false
   }
-  return true
+
+  const currentTime = Date.now()
+
+  const difference =
+    currentTime - lastDeviceHeartbeat
+
+  return difference < DEVICE_TIMEOUT
 }
 
-// Initialize on module load
-initStorage()
+// ============================================================
+// GET LAST HEARTBEAT
+// ============================================================
+
+function getLastDeviceHeartbeat() {
+  return lastDeviceHeartbeat
+}
+
+// ============================================================
+// EXPORT FUNCTIONS
+// ============================================================
 
 module.exports = {
   addMessage,
+
   getLatestMessage,
+
   getAllMessages,
+
   clearMessages,
+
+  updateDeviceHeartbeat,
+
   isDeviceConnected,
+
+  getLastDeviceHeartbeat,
 }
