@@ -33,7 +33,7 @@ const {
   getAllMessages,
   clearMessages,
   isDeviceConnected,
-} = require('./messages')
+} = require('./messages.js')
 
 // ── Create Express App ───────────────────────────────────────
 const app = express()
