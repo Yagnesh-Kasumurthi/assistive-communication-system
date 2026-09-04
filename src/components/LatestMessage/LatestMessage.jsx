@@ -56,7 +56,9 @@ export default function LatestMessage() {
             <span className={`latest-message-category ${categoryClass}`}>
               {latestMessage.category}
             </span>
-            <span className="latest-message-time">{latestMessage.time}</span>
+            <span className="latest-message-time">
+              {latestMessage.indianDateTime || latestMessage.time}
+            </span>
           </div>
         </div>
       )}

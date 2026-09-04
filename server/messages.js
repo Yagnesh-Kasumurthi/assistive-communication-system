@@ -3,6 +3,51 @@
 // MESSAGE AND DEVICE STATUS STORAGE
 // ============================================================
 
+
+// ============================================================
+// INDIA DATE-TIME HELPER
+// Generates a timestamp in IST (Asia/Kolkata).
+// Uses 'en-GB' locale (not 'en-IN') because 'en-IN' can produce
+// a 2-digit year in some Node.js/ICU builds, hiding the date.
+// Format: DD-MM-YYYY HH:mm:ss
+// Example: 04-09-2026 14:35:20
+// ============================================================
+
+function getIndiaDateTime() {
+  const now = new Date()
+
+  // 'en-GB' guarantees DD/MM/YYYY order and a 4-digit year
+  // on every Node.js version. timeZone forces IST regardless
+  // of the server's OS locale setting.
+  const fmt = new Intl.DateTimeFormat('en-GB', {
+    timeZone: 'Asia/Kolkata',
+    day:    '2-digit',
+    month:  '2-digit',
+    year:   'numeric',
+    hour:   '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hour12: false,
+  })
+
+  const parts = fmt.formatToParts(now)
+
+  const get = (type) => {
+    const part = parts.find(p => p.type === type)
+    return part ? part.value : '00'
+  }
+
+  const day    = get('day')
+  const month  = get('month')
+  const year   = get('year')
+  const hour   = get('hour')
+  const minute = get('minute')
+  const second = get('second')
+
+  // Assemble manually: DD-MM-YYYY HH:mm:ss
+  return `${day}-${month}-${year} ${hour}:${minute}:${second}`
+}
+
 // Store all received messages
 let messages = []
 
@@ -23,7 +68,9 @@ function addMessage({
   category,
   button,
 }) {
-  const now = new Date()
+  // Generate IST timestamp once, at the moment of receipt.
+  // This is never regenerated — polling will return this same value.
+  const indianDateTime = getIndiaDateTime()
 
   const storedMessage = {
     id: Date.now(),
@@ -34,11 +81,12 @@ function addMessage({
 
     button: button || null,
 
-    timestamp: now.toISOString(),
+    // indianDateTime: the canonical timestamp shown in the UI
+    // Format: DD-MM-YYYY HH:mm:ss  (always Asia/Kolkata)
+    indianDateTime,
 
-    time: now.toLocaleTimeString(),
-
-    date: now.toLocaleDateString(),
+    // Keep ISO for any server-side debug logging
+    timestamp: new Date().toISOString(),
   }
 
   messages.unshift(storedMessage)

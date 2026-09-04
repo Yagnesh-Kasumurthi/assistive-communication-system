@@ -16,42 +16,54 @@ const MessageContext = createContext(null)
 
 
 // ============================================================
-// FORMAT TIME
-// Converts backend UTC timestamp to the browser's local time.
-// Example:
-// Backend: 16:46 UTC
-// India:   10:16 PM
+// GET INDIA DATE-TIME
+// Generates IST timestamp in DD-MM-YYYY HH:mm:ss format.
+// Used as a fallback only when the server does not supply
+// indianDateTime (e.g. for frontend-only simulated messages).
+// Uses 'en-GB' locale — 'en-IN' can return a 2-digit year
+// in some environments, causing the date to not display.
 // ============================================================
 
-const formatTime = (timestamp) => {
-  if (!timestamp) {
-    const now = new Date()
+function getIndiaDateTime() {
+  const now = new Date()
 
-    return now.toLocaleTimeString('en-IN', {
-      hour: 'numeric',
-      minute: '2-digit',
-      hour12: true,
-    })
-  }
-
-  const date = new Date(timestamp)
-
-  // If timestamp is invalid, fall back safely
-  if (isNaN(date.getTime())) {
-    return timestamp
-  }
-
-  return date.toLocaleTimeString('en-IN', {
-    hour: 'numeric',
+  // 'en-GB' gives unambiguous DD/MM/YYYY + 4-digit year
+  // on all browsers and Node.js versions.
+  const fmt = new Intl.DateTimeFormat('en-GB', {
+    timeZone: 'Asia/Kolkata',
+    day:    '2-digit',
+    month:  '2-digit',
+    year:   'numeric',
+    hour:   '2-digit',
     minute: '2-digit',
-    hour12: true,
+    second: '2-digit',
+    hour12: false,
   })
+
+  const parts = fmt.formatToParts(now)
+
+  const get = (type) => {
+    const part = parts.find(p => p.type === type)
+    return part ? part.value : '00'
+  }
+
+  const day    = get('day')
+  const month  = get('month')
+  const year   = get('year')
+  const hour   = get('hour')
+  const minute = get('minute')
+  const second = get('second')
+
+  // Assemble manually: DD-MM-YYYY HH:mm:ss
+  return `${day}-${month}-${year} ${hour}:${minute}:${second}`
 }
 
 
 // ============================================================
 // NORMALIZE MESSAGE
-// Ensures every message from backend has the correct local time
+// Ensures every message has a consistent shape.
+// Preserves the server-generated indianDateTime field.
+// Never regenerates the timestamp on re-render or polling.
 // ============================================================
 
 const normalizeMessage = (msg) => {
@@ -66,12 +78,11 @@ const normalizeMessage = (msg) => {
 
     category: msg.category || 'General',
 
-    // Try all possible timestamp fields from backend
-    time: formatTime(
-      msg.timestamp ||
-      msg.createdAt ||
-      msg.time
-    ),
+    // Use server-supplied IST timestamp if present.
+    // Fall back to generating one now (only for frontend-simulated messages).
+    indianDateTime:
+      msg.indianDateTime ||
+      getIndiaDateTime(),
   }
 }
 

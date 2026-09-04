@@ -147,7 +147,7 @@ app.post('/api/message', (req, res) => {
   console.log(`Message: ${message}`)
   console.log(`Category: ${category}`)
   console.log(`Button: ${button || 'N/A'}`)
-  console.log(`Time: ${stored.time}`)
+  console.log(`Time: ${stored.indianDateTime}`)
   console.log('========================================')
   console.log('')
 
